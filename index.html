@@ -31,7 +31,7 @@
 
     <!-- Open Graph / Facebook / LinkedIn / Discord -->
     <meta property="og:type" content="website">
-    <meta property="og:url" content="https://vanilla-ide.com/">
+    <meta property="og:url" content="https://tu-dominio-vanilla-ide.com/">
     <meta property="og:title" content="Vanilla IDE - Programa desde tu navegador">
     <meta property="og:description" content="Descubre Vanilla IDE: Ligero, rápido y con asistente de IA integrado. Crea, edita y previsualiza tu código en tiempo real.">
     <meta property="og:image" content="https://file.garden/aKIWFnfXzhwEFeKS/vanilla%20ide/logo.png">
@@ -271,17 +271,39 @@
                     </div>
                 </div>
 
-                <!-- VISTA: Extensiones -->
-                <div id="view-extensions" class="hidden flex-1 flex flex-col overflow-hidden">
-                    <div class="p-2 text-xs font-semibold tracking-wider text-stone-500 uppercase border-b border-vanilla-border bg-vanilla-sidebar flex justify-between items-center">
-                        <span>Extensiones</span>
-                        <i class="ph ph-arrows-clockwise cursor-pointer hover:text-vanilla-accent transition-colors" title="Recargar Mercado" onclick="fetchAndRenderExtensions()"></i>
-                    </div>
-                    <div id="extensions-list" class="flex-1 overflow-y-auto p-2 flex flex-col gap-2 bg-[#fdfbf7]">
-                        <div class="text-center text-xs text-stone-400 mt-4 flex flex-col items-center">
-                            <i class="ph ph-squares-four text-4xl mb-2 opacity-50"></i>
-                            <p>Haz clic en recargar para ver el mercado de extensiones.</p>
+                <!-- VISTA: Extensiones (MARKETPLACE ACTUALIZADO) -->
+                <div id="view-extensions" class="hidden flex-1 flex flex-col overflow-hidden relative">
+                    <!-- HEADER -->
+                    <div class="p-2 text-xs font-semibold tracking-wider text-stone-500 uppercase border-b border-vanilla-border bg-vanilla-sidebar flex justify-between items-center z-10 shrink-0">
+                        <span id="extensions-title">Mercado</span>
+                        <div class="flex gap-2">
+                            <i id="btn-back-ext" class="ph ph-arrow-left cursor-pointer hover:text-vanilla-accent transition-colors hidden text-base p-1 hover:bg-vanilla-hover rounded" title="Volver a la lista" onclick="closeExtensionDetail()"></i>
+                            <i class="ph ph-arrows-clockwise cursor-pointer hover:text-vanilla-accent transition-colors text-base p-1 hover:bg-vanilla-hover rounded" title="Recargar Mercado" onclick="fetchAndRenderExtensions()"></i>
                         </div>
+                    </div>
+
+                    <!-- VISTA LISTA (BUSCADOR + LISTADO) -->
+                    <div id="ext-list-view" class="flex-1 flex flex-col overflow-hidden">
+                        <!-- SEARCH BAR -->
+                        <div class="p-2 bg-vanilla-sidebar border-b border-vanilla-border shrink-0">
+                            <div class="relative flex items-center">
+                                <i class="ph ph-magnifying-glass absolute left-2 text-stone-400"></i>
+                                <input type="text" id="ext-search-input" placeholder="Buscar extensiones..." class="w-full bg-vanilla-bg border border-vanilla-border rounded pl-7 pr-2 py-1.5 text-xs text-stone-700 outline-none focus:border-vanilla-accent focus:ring-1 focus:ring-vanilla-accent transition-shadow shadow-inner" oninput="filterExtensions()">
+                            </div>
+                        </div>
+                        
+                        <!-- LIST -->
+                        <div id="extensions-list" class="flex-1 overflow-y-auto p-2 flex flex-col gap-2 bg-[#fdfbf7]">
+                            <div class="text-center text-xs text-stone-400 mt-4 flex flex-col items-center">
+                                <i class="ph ph-squares-four text-4xl mb-2 opacity-50"></i>
+                                <p>Haz clic en recargar para ver el mercado de extensiones.</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- VISTA DETALLE -->
+                    <div id="ext-detail-view" class="hidden absolute inset-0 top-[37px] bg-vanilla-bg z-20 flex-col overflow-y-auto">
+                        <!-- El contenido del detalle se inyecta dinámicamente aquí -->
                     </div>
                 </div>
 
@@ -622,6 +644,53 @@
         let aiCompleterTimeout;
         let activeSidebarView = 'explorer';
 
+        // GLOBALES PARA EXTENSIONES
+        let installedExtensions = new Set();
+        window.availableExtensions = [];
+        window.extensionsLoaded = false;
+
+        // --- SISTEMA DE PERSISTENCIA DE EXTENSIONES ---
+        function saveInstalledExtensions() {
+            try {
+                localStorage.setItem('vanilla_ide_extensions', JSON.stringify(Array.from(installedExtensions)));
+            } catch (e) {
+                console.error("Error guardando extensiones", e);
+            }
+        }
+
+        function loadInstalledExtensions() {
+            try {
+                const savedStr = localStorage.getItem('vanilla_ide_extensions');
+                if (!savedStr) return;
+                
+                const saved = JSON.parse(savedStr);
+                let loadedCount = 0;
+                
+                saved.forEach(id => {
+                    const ext = window.availableExtensions.find(e => e.id === id);
+                    if (ext) {
+                        installedExtensions.add(id);
+                        if (ext.jscode) {
+                            try {
+                                const runExt = new Function(ext.jscode);
+                                runExt();
+                                loadedCount++;
+                            } catch(e) {
+                                console.error(`Error auto-cargando extensión ${id}:`, e);
+                            }
+                        }
+                    }
+                });
+
+                if (loadedCount > 0 && typeof term !== 'undefined') {
+                    term.writeln(`\r\n\x1b[32m[Sistema]\x1b[0m ${loadedCount} extensión(es) auto-cargada(s) desde memoria.`);
+                    term.write(getPrompt());
+                }
+            } catch(e) {
+                console.error("Error al cargar estado de extensiones", e);
+            }
+        }
+
         // --- SISTEMA DE CONFIGURACIÓN DE IA DINÁMICO ---
         async function fetchModels() {
             const provider = document.getElementById('ai-provider').value;
@@ -651,7 +720,6 @@
                     const res = await fetch('https://api.llm7.io/v1/models');
                     const data = await res.json();
                     
-                    // Compatible con formato OpenAI listado de modelos
                     const models = Array.isArray(data) ? data : (data.data || []);
                     modelSelect.innerHTML = '';
                     
@@ -665,7 +733,7 @@
                     });
 
                     if (modelSelect.options.length === 0) {
-                        modelSelect.innerHTML = '<option value="gpt-4o">gpt-4o</option>'; // Fallback si llega vacio
+                        modelSelect.innerHTML = '<option value="gpt-4o">gpt-4o</option>';
                     }
                 } catch(e) {
                     modelSelect.innerHTML = `
@@ -676,17 +744,14 @@
                     `;
                 }
             }
-            saveSettings();
+            saveSettings(); // Guardar el modelo por defecto / restaurado al cargar
         }
 
         function handleProviderChange() {
             const provider = document.getElementById('ai-provider').value;
             const apiKeyContainer = document.getElementById('apikey-container');
             
-            // Si en el futuro otro proveedor requiere llave, se controla aqui.
-            // Actualmente ni pollinations ni llm7 requieren API Key
             apiKeyContainer.classList.add('hidden');
-            
             fetchModels();
         }
 
@@ -708,7 +773,6 @@
                 endpoint = 'https://text.pollinations.ai/openai'; 
             } else if (provider === 'llm7') {
                 endpoint = 'https://api.llm7.io/v1/chat/completions';
-                // Solo adjuntar si se pone una key manualmente (aunque no es obligatorio para llm7)
                 if(apiKey) {
                     headers['Authorization'] = 'Bearer ' + apiKey; 
                 }
@@ -719,6 +783,17 @@
 
         // --- ENVOLVEMOS EL INICIO EN DOMContentLoaded ---
         document.addEventListener('DOMContentLoaded', () => {
+
+            // Pre-cargar la lista de extensiones globales si db.js ya ejecutó
+            try {
+                if (typeof extensions !== 'undefined') {
+                    window.availableExtensions = extensions;
+                } else if (typeof vanillaExtensions !== 'undefined') {
+                    window.availableExtensions = vanillaExtensions;
+                }
+            } catch(err) {
+                console.warn("Variable de extensiones global no inicializada aún");
+            }
 
             // --- 2. CONFIGURACIÓN DEL EDITOR (ACE) ---
             if (typeof ace !== 'undefined') {
@@ -883,9 +958,11 @@
                 });
             }
 
-            // --- INICIALIZACIÓN ---
+            // --- INICIALIZACIÓN SECUNDARIA ---
             setTimeout(() => {
                 loadSettings(); 
+                loadInstalledExtensions(); // <- Autocargar extensiones guardadas al iniciar
+
                 const indExplorer = document.getElementById('indicator-explorer');
                 if (indExplorer) indExplorer.classList.remove('hidden');
                 const btnExplorer = document.getElementById('btn-explorer');
@@ -896,7 +973,6 @@
         }); // FIN DEL DOMContentLoaded
 
         // --- FUNCIONES AI INLINE / AUTO-FIX ---
-
         async function executeInlineAI(prompt) {
             const selectionRange = editor.getSelectionRange();
             const selectedText = editor.session.getTextRange(selectionRange);
@@ -1086,6 +1162,7 @@
                         localStorage.removeItem('vanilla_ide_fontsize');
                         localStorage.removeItem('vanilla_ide_theme');
                         localStorage.removeItem('vanilla_ide_chats');
+                        localStorage.removeItem('vanilla_ide_extensions'); // Limpiar extensiones también
                     } catch(e) {}
                     closeSettings(); 
                     showDialog("Éxito", "Los datos han sido borrados de tu navegador.", false, () => {
@@ -1714,14 +1791,15 @@
             }
         }
 
-        // --- SISTEMA DE EXTENSIONES 100% COMPATIBLE ---
-        let installedExtensions = new Set();
-        window.availableExtensions = [];
-        window.extensionsLoaded = false;
-
+        // --- SISTEMA DE EXTENSIONES MARKETPLACE ---
         async function fetchAndRenderExtensions() {
             const extListEl = document.getElementById('extensions-list');
+            const searchInput = document.getElementById('ext-search-input');
             if (!extListEl) return;
+
+            // Limpiar busqueda y volver a lista si estabamos en detalle
+            if (searchInput) searchInput.value = '';
+            closeExtensionDetail();
 
             try {
                 extListEl.innerHTML = '<div class="text-center text-xs text-stone-400 mt-4 flex flex-col items-center"><i class="ph ph-circle-notch animate-spin text-2xl mb-2 text-vanilla-accent"></i><p>Cargando mercado...</p></div>';
@@ -1729,21 +1807,8 @@
                 // Simula una ligera latencia de red para mejor UX de "carga"
                 await new Promise(resolve => setTimeout(resolve, 600)); 
 
-                // LISTA DE EXTENSIONES (Cargada desde db.js)
-                let loadedExtensions = [];
-                try {
-                    if (typeof extensions !== 'undefined') {
-                        loadedExtensions = extensions;
-                    } else if (typeof vanillaExtensions !== 'undefined') {
-                        loadedExtensions = vanillaExtensions;
-                    } else if (typeof window.availableExtensions !== 'undefined' && window.availableExtensions.length > 0) {
-                        loadedExtensions = window.availableExtensions;
-                    }
-                } catch(err) {
-                    console.warn("Variable de extensiones no encontrada en el global scope", err);
-                }
-
-                window.availableExtensions = loadedExtensions;
+                let loadedExtensions = window.availableExtensions || [];
+                
                 extListEl.innerHTML = '';
                 
                 if (loadedExtensions.length === 0) {
@@ -1754,17 +1819,24 @@
                 loadedExtensions.forEach(ext => {
                     const isInstalled = installedExtensions.has(ext.id);
                     const div = document.createElement('div');
-                    div.className = 'bg-vanilla-bg border border-vanilla-border p-3 rounded flex flex-col gap-1 shadow-sm transition-all hover:shadow-md';
+                    
+                    div.className = 'ext-card bg-vanilla-bg border border-vanilla-border p-3 rounded flex flex-col gap-1 shadow-sm transition-all hover:shadow-md cursor-pointer hover:border-vanilla-accent/50';
+                    div.dataset.name = ext.name || '';
+                    div.dataset.desc = ext.description || '';
+                    div.onclick = () => openExtensionDetail(ext.id);
+
                     div.innerHTML = `
                         <div class="flex justify-between items-start mb-1">
-                            <div class="font-bold text-stone-700 text-xs flex items-center gap-1"><i class="ph ph-puzzle-piece text-vanilla-accent"></i> ${ext.name}</div>
+                            <div class="font-bold text-stone-700 text-xs flex items-center gap-1"><i class="ph ph-puzzle-piece text-vanilla-accent text-lg"></i> ${ext.name}</div>
                             <span class="text-[9px] text-stone-400 bg-vanilla-hover px-1.5 py-0.5 rounded font-mono">v${ext.version || '1.0.0'}</span>
                         </div>
-                        <div class="text-[10px] text-stone-500 leading-snug">${ext.description}</div>
+                        <div class="text-[10px] text-stone-500 leading-snug line-clamp-2">${ext.description}</div>
                         <div class="text-[9px] text-stone-400 mt-1 flex items-center gap-1"><i class="ph ph-user"></i> ${ext.developer}</div>
-                        <button id="btn-ext-${ext.id}" class="mt-2 w-full text-[11px] py-1.5 rounded transition-colors font-medium flex justify-center items-center gap-1 ${isInstalled ? 'bg-[#fdf3f3] text-[#d9534f] hover:bg-[#fae4e4] border border-[#f5c6c6]' : 'bg-vanilla-accent text-white hover:bg-vanilla-accentHover'}" onclick="toggleExtension('${ext.id}')">
-                            ${isInstalled ? '<i class="ph ph-trash"></i> Desinstalar' : '<i class="ph ph-download-simple"></i> Instalar y Activar'}
-                        </button>
+                        <div class="mt-2 flex justify-end">
+                            <button id="btn-ext-${ext.id}" class="text-[10px] px-2 py-1 rounded transition-colors font-medium flex justify-center items-center gap-1 ${isInstalled ? 'bg-vanilla-hover text-stone-600 hover:text-red-500' : 'bg-vanilla-accent text-white hover:bg-vanilla-accentHover'}" onclick="event.stopPropagation(); toggleExtension('${ext.id}')">
+                                ${isInstalled ? '<i class="ph ph-gear"></i> Administrar' : '<i class="ph ph-download-simple"></i> Instalar'}
+                            </button>
+                        </div>
                     `;
                     extListEl.appendChild(div);
                 });
@@ -1775,36 +1847,128 @@
             }
         }
 
+        function filterExtensions() {
+            const query = document.getElementById('ext-search-input').value.toLowerCase();
+            const cards = document.querySelectorAll('.ext-card');
+            cards.forEach(card => {
+                const name = card.dataset.name.toLowerCase();
+                const desc = card.dataset.desc.toLowerCase();
+                if (name.includes(query) || desc.includes(query)) {
+                    card.style.display = 'flex';
+                } else {
+                    card.style.display = 'none';
+                }
+            });
+        }
+
+        function openExtensionDetail(id) {
+            const ext = window.availableExtensions.find(e => e.id === id);
+            if(!ext) return;
+
+            const isInstalled = installedExtensions.has(id);
+            const detailView = document.getElementById('ext-detail-view');
+            const listView = document.getElementById('ext-list-view');
+            const btnBack = document.getElementById('btn-back-ext');
+            const title = document.getElementById('extensions-title');
+
+            title.textContent = "Detalle";
+            btnBack.classList.remove('hidden');
+
+            detailView.innerHTML = `
+                <div class="p-4 flex flex-col gap-4 relative">
+                    <div class="flex items-start gap-3">
+                        <div class="w-12 h-12 shrink-0 bg-vanilla-sidebar rounded-lg border border-vanilla-border flex items-center justify-center text-vanilla-accent text-2xl shadow-sm">
+                            <i class="ph ph-puzzle-piece"></i>
+                        </div>
+                        <div class="flex flex-col min-w-0">
+                            <h2 class="font-bold text-stone-800 text-sm truncate" title="${ext.name}">${ext.name}</h2>
+                            <span class="text-[10px] text-stone-500 truncate" title="${ext.developer}">${ext.developer}</span>
+                            <span class="text-[10px] text-stone-400 font-mono mt-0.5">v${ext.version || '1.0.0'}</span>
+                        </div>
+                    </div>
+
+                    <button id="btn-detail-ext-${ext.id}" class="w-full text-xs py-2 rounded transition-colors font-medium flex justify-center items-center gap-2 shadow-sm ${isInstalled ? 'bg-[#fdf3f3] text-[#d9534f] hover:bg-[#fae4e4] border border-[#f5c6c6]' : 'bg-vanilla-accent text-white hover:bg-vanilla-accentHover'}" onclick="toggleExtension('${ext.id}')">
+                        ${isInstalled ? '<i class="ph ph-trash"></i> Desinstalar' : '<i class="ph ph-download-simple"></i> Instalar'}
+                    </button>
+
+                    <div class="border-t border-vanilla-border pt-3">
+                        <h3 class="text-[11px] font-semibold text-stone-700 mb-1 uppercase tracking-wider">Descripción</h3>
+                        <p class="text-[11px] text-stone-600 leading-relaxed">${ext.description}</p>
+                    </div>
+
+                    ${ext.readme ? `
+                    <div class="border-t border-vanilla-border pt-3 mt-1">
+                        <h3 class="text-[11px] font-semibold text-stone-700 mb-2 uppercase tracking-wider">Acerca de</h3>
+                        <div class="text-[11px] text-stone-600 leading-relaxed markdown-body">
+                            ${formatMarkdown(ext.readme)}
+                        </div>
+                    </div>` : ''}
+                </div>
+            `;
+
+            listView.classList.add('hidden');
+            detailView.classList.remove('hidden');
+            detailView.classList.add('flex');
+        }
+
+        function closeExtensionDetail() {
+            const detailView = document.getElementById('ext-detail-view');
+            const listView = document.getElementById('ext-list-view');
+            const btnBack = document.getElementById('btn-back-ext');
+            const title = document.getElementById('extensions-title');
+
+            if (title) title.textContent = "Mercado";
+            if (btnBack) btnBack.classList.add('hidden');
+
+            if (detailView) {
+                detailView.classList.add('hidden');
+                detailView.classList.remove('flex');
+            }
+            if (listView) listView.classList.remove('hidden');
+        }
+
         function toggleExtension(id) {
             const ext = window.availableExtensions.find(e => e.id === id);
             if(!ext) return;
             
-            const btn = document.getElementById(`btn-ext-${id}`);
-            if(!btn) return;
-            
-            if (installedExtensions.has(id)) {
+            const isInstalled = installedExtensions.has(id);
+
+            if (isInstalled) {
                 // Desinstalar
                 installedExtensions.delete(id);
-                btn.innerHTML = '<i class="ph ph-download-simple"></i> Instalar y Activar';
-                btn.className = 'mt-2 w-full text-[11px] py-1.5 rounded transition-colors font-medium flex justify-center items-center gap-1 bg-vanilla-accent text-white hover:bg-vanilla-accentHover';
-                showDialog("Extensión Desactivada", `La extensión '${ext.name}' ha sido desactivada temporalmente (recarga para limpiar completamente).`);
+                showDialog("Extensión Desactivada", `La extensión '${ext.name}' ha sido desactivada temporalmente. Para limpiar sus efectos completamente debes recargar el IDE.`);
             } else {
                 // Instalar
                 try {
                     if (ext.jscode) {
-                        // Ejecutar el código de la extensión en el contexto del IDE
                         const runExt = new Function(ext.jscode);
                         runExt();
                     }
                     installedExtensions.add(id);
-                    btn.innerHTML = '<i class="ph ph-trash"></i> Desinstalar';
-                    btn.className = 'mt-2 w-full text-[11px] py-1.5 rounded transition-colors font-medium flex justify-center items-center gap-1 bg-[#fdf3f3] text-[#d9534f] hover:bg-[#fae4e4] border border-[#f5c6c6]';
-                    
                     if(term) term.writeln(`\r\n\x1b[32m[Extensión]\x1b[0m Instalada y activada: ${ext.name}`);
                 } catch(e) {
                     showDialog("Error de Extensión", `Fallo al ejecutar la extensión '${ext.name}': ${e.message}`);
                     if(term) term.writeln(`\r\n\x1b[31m[Error Extensión]\x1b[0m ${e.message}`);
+                    return; // abort if error
                 }
+            }
+
+            saveInstalledExtensions(); // <- GUARDAR PERSISTENCIA
+            
+            const nowInstalled = installedExtensions.has(id);
+
+            // 1. Actualizar botón en la vista de la lista
+            const btnList = document.getElementById(`btn-ext-${id}`);
+            if (btnList) {
+                btnList.innerHTML = nowInstalled ? '<i class="ph ph-gear"></i> Administrar' : '<i class="ph ph-download-simple"></i> Instalar';
+                btnList.className = `text-[10px] px-2 py-1 rounded transition-colors font-medium flex justify-center items-center gap-1 ${nowInstalled ? 'bg-vanilla-hover text-stone-600 hover:text-red-500' : 'bg-vanilla-accent text-white hover:bg-vanilla-accentHover'}`;
+            }
+
+            // 2. Actualizar botón en la vista de detalle (si está abierta)
+            const btnDetail = document.getElementById(`btn-detail-ext-${id}`);
+            if (btnDetail) {
+                btnDetail.innerHTML = nowInstalled ? '<i class="ph ph-trash"></i> Desinstalar' : '<i class="ph ph-download-simple"></i> Instalar';
+                btnDetail.className = `w-full text-xs py-2 rounded transition-colors font-medium flex justify-center items-center gap-2 shadow-sm ${nowInstalled ? 'bg-[#fdf3f3] text-[#d9534f] hover:bg-[#fae4e4] border border-[#f5c6c6]' : 'bg-vanilla-accent text-white hover:bg-vanilla-accentHover'}`;
             }
         }
 
